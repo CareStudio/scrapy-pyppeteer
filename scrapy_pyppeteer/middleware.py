@@ -10,6 +10,14 @@ from twisted.internet.defer import Deferred
 from .browser_request import BrowserRequest
 from .browser_response import BrowserResponse
 
+from scrapy.utils.reactor import verify_installed_reactor
+from scrapy.crawler import Crawler
+from scrapy.http import Request, Response
+from scrapy.http.headers import Headers
+from scrapy.responsetypes import responsetypes
+from scrapy.statscollectors import StatsCollector
+from scrapy.utils.defer import deferred_from_coro
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +27,9 @@ class ScrapyPyppeteerDownloaderMiddleware:
     Probably eventually this should be moved to scrapy core as a downloader.
     """
     def __init__(self, settings: Settings):
+        verify_installed_reactor("twisted.internet.asyncioreactor.AsyncioSelectorReactor")
         self._browser: Optional[Browser] = None
-        self._launch_options = settings.getdict('PYPPETEER_LAUNCH') or {}
+        self._launch_options = settings.getdict('PYPPETEER_LAUNCH_OPTIONS') or {}
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -37,14 +46,23 @@ class ScrapyPyppeteerDownloaderMiddleware:
             self._browser = await pyppeteer.launch(**self._launch_options)
         page = await self._browser.newPage()
         n_tabs = _n_browser_tabs(self._browser)
-        logger.debug(f'{n_tabs} tabs open')
+        logger.debug(f'{n_tabs} tabs opened')
         if request.is_blank:
             url = request.url
         else:
-            await page.goto(request.url)
+            response = await page.goto(request.url)
             url = page.url
             # TODO set status and headers
-        return BrowserResponse(url=url, browser_tab=page)
+        body = (await page.content()).encode("utf8")
+        headers = Headers(response.headers)
+
+        return BrowserResponse(
+            url=url, 
+            page=page, 
+            status=response.status,
+            headers=headers,
+            body=body,
+            request=request)
 
 
 def _n_browser_tabs(browser: Browser) -> int:

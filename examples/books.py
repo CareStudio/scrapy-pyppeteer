@@ -23,7 +23,7 @@ class BooksSpider(scrapy.Spider):
         yield BrowserRequest(self.start_url)
 
     async def parse(self, response: BrowserResponse):
-        page = response.browser_tab
+        page = response.page
         yield {'url': response.url}
         for link in await page.querySelectorAll('a'):
             url = await page.evaluate('link => link.href', link)
