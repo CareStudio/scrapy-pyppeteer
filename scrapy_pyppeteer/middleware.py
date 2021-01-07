@@ -53,16 +53,18 @@ class ScrapyPyppeteerDownloaderMiddleware:
             response = await page.goto(request.url)
             url = page.url
             # TODO set status and headers
-        body = (await page.content()).encode("utf8")
-        headers = Headers(response.headers)
+        return BrowserResponse( url=url,  page=page, )
 
-        return BrowserResponse(
-            url=url, 
-            page=page, 
-            status=response.status,
-            headers=headers,
-            body=body,
-            request=request)
+        # TODO: how to enable Response have the selector?
+        # body = (await page.content()).encode("utf8")
+        # print(f"SOONG body{body}")
+        # headers = Headers(response.headers)
+        # return BrowserResponse( url=url,  page=page, 
+        #     status=response.status,
+        #     headers=headers,   # will cause httpresponse
+        #     body=body,
+        #     request=request
+        #     )
 
 
 def _n_browser_tabs(browser: Browser) -> int:
