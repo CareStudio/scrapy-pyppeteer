@@ -1,13 +1,20 @@
-import scrapy
+"""This module contains the ``PuppeteerRequest`` class"""
+
+from scrapy import Request
 
 
-class BrowserRequest(scrapy.Request):
-    _BLANK_URL = 'about:blank'
+class BrowserRequest(Request):
+    def __init__(self, url, callback=None, wait_until=None, wait_for=None, *args, **kwargs):
+        """Initialize a new Puppeteer request
+        Parameters
+        ----------
+        wait_until: basestring
+            One of "load", "domcontentloaded", "networkidle0", "networkidle2".
+            See https://miyakogi.github.io/pyppeteer/reference.html#pyppeteer.page.Page.goto
+        """
 
-    @classmethod
-    def blank(cls):
-        return BrowserRequest(cls._BLANK_URL, dont_filter=True)
+        self.wait_until = wait_until or 'domcontentloaded'
+        self.wait_for = wait_for
+        # self.screenshot = screenshot
 
-    @property
-    def is_blank(self):
-        return self.url == self._BLANK_URL
+        super().__init__(url, callback, *args, **kwargs)

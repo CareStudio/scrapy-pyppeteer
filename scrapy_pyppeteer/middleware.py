@@ -10,6 +10,9 @@ from twisted.internet.defer import Deferred
 from .browser_request import BrowserRequest
 from .browser_response import BrowserResponse
 
+from scrapy import signals
+from scrapy.http import HtmlResponse
+
 from scrapy.utils.reactor import verify_installed_reactor
 from scrapy.crawler import Crawler
 from scrapy.http import Request, Response
@@ -23,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 
 class ScrapyPyppeteerDownloaderMiddleware:
-    """ Handles launching browser tabs, acts as a downloader.
+    """Downloader middleware handling the requests with Puppeteer
+
+    Handles launching browser tabs, acts as a downloader.
     Probably eventually this should be moved to scrapy core as a downloader.
     """
     def __init__(self, settings: Settings):
@@ -32,39 +37,98 @@ class ScrapyPyppeteerDownloaderMiddleware:
         self._launch_options = settings.getdict('PYPPETEER_LAUNCH_OPTIONS') or {}
 
     @classmethod
+    async def _from_crawler(cls, crawler):
+        middleware = cls(crawler.settings)
+        crawler.signals.connect(middleware.spider_closed, signals.spider_closed)
+        return middleware
+
+    @classmethod
     def from_crawler(cls, crawler):
-        return cls(crawler.settings)
+        """Initialize the middleware"""
+        loop = asyncio.get_event_loop()
+        middleware = loop.run_until_complete(
+            asyncio.ensure_future(cls._from_crawler(crawler))
+        )
+        return middleware
 
     def process_request(self, request, spider):
+        """Check if the Request should be handled by Puppeteer"""
         if isinstance(request, BrowserRequest):
-            return _aio_as_deferred(self.process_browser_request(request))
+            return _aio_as_deferred(self._process_request(request, spider))
         else:
-            return request
+            return None
 
-    async def process_browser_request(self, request: BrowserRequest):
+    async def _process_request(self, request: BrowserRequest, spider):
+        """Handle the request using Puppeteer"""
         if self._browser is None:
             self._browser = await pyppeteer.launch(**self._launch_options)
+
         page = await self._browser.newPage()
+
         n_tabs = _n_browser_tabs(self._browser)
         logger.debug(f'{n_tabs} tabs opened')
-        if request.is_blank:
-            url = request.url
-        else:
-            response = await page.goto(request.url)
-            url = page.url
-            # TODO set status and headers
-        return BrowserResponse( url=url,  page=page, )
 
-        # TODO: how to enable Response have the selector?
-        # body = (await page.content()).encode("utf8")
-        # print(f"SOONG body{body}")
-        # headers = Headers(response.headers)
-        # return BrowserResponse( url=url,  page=page, 
-        #     status=response.status,
-        #     headers=headers,   # will cause httpresponse
-        #     body=body,
-        #     request=request
-        #     )
+        # Cookies
+        if isinstance(request.cookies, dict):
+            await page.setCookie(*[
+                {'name': k, 'value': v}
+                for k, v in request.cookies.items()
+            ])
+        else:
+            await page.setCookie(request.cookies)
+
+        # # The headers must be set using request interception
+        # await page.setRequestInterception(True)
+        #
+        # @page.on('request')
+        # async def _handle_headers(pu_request):
+        #     overrides = {
+        #         'headers': {
+        #             k.decode(): ','.join(map(lambda v: v.decode(), v))
+        #             for k, v in request.headers.items()
+        #         }
+        #     }
+        #     await pu_request.continue_(overrides=overrides)
+
+        response = await page.goto(
+            request.url,
+            {
+                'waitUntil': request.wait_until
+            },
+        )
+
+        if request.wait_for:
+            await page.waitFor(request.wait_for)
+
+        # TODO
+        # if request.screenshot:
+        #     request.meta['screenshot'] = await page.screenshot()
+
+        content = await page.content()
+        body = str.encode(content)
+        request.meta['page'] = page
+
+        # Necessary to bypass the compression middleware (?)
+        response.headers.pop('content-encoding', None)
+        response.headers.pop('Content-Encoding', None)
+
+        return HtmlResponse(
+            page.url,
+            status=response.status,
+            headers=response.headers,
+            body=body,
+            encoding='utf-8',
+            request=request
+        )
+
+
+
+    async def _spider_closed(self):
+        await self._browser.close()
+
+    def spider_closed(self):
+        """Shutdown the browser when spider is closed"""
+        return _aio_as_deferred(self._spider_closed())
 
 
 def _n_browser_tabs(browser: Browser) -> int:
@@ -78,5 +142,8 @@ def _n_browser_tabs(browser: Browser) -> int:
     return n_tabs
 
 
+
+
 def _aio_as_deferred(f):
+    """Transform a Twisted Deffered to an Asyncio Future"""
     return Deferred.fromFuture(asyncio.ensure_future(f))
