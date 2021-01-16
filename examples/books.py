@@ -1,5 +1,7 @@
 import scrapy
-from scrapy_pyppeteer import BrowserRequest, BrowserResponse
+from scrapy_pyppeteer import BrowserRequest
+from pyppeteer.page import Page
+
 
 
 class BooksSpider(scrapy.Spider):
@@ -22,10 +24,24 @@ class BooksSpider(scrapy.Spider):
     def start_requests(self):
         yield BrowserRequest(self.start_url)
 
-    async def parse(self, response: BrowserResponse):
-        page = response.page
+    async def parse(self, response, page: Page):
         yield {'url': response.url}
         for link in await page.querySelectorAll('a'):
             url = await page.evaluate('link => link.href', link)
             yield BrowserRequest(url)
         await page.close()
+
+
+
+
+
+# the runer
+from scrapy.crawler import CrawlerProcess
+process = CrawlerProcess(settings={
+    # "FEEDS": {
+    #     "items.json": {"format": "json"},
+    # },
+})
+
+process.crawl(BooksSpider)
+process.start() # the script will block here until the crawling is finished

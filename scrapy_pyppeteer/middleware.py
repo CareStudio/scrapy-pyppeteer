@@ -1,25 +1,15 @@
 import asyncio
 import logging
 from typing import Optional
-
 import pyppeteer
 from pyppeteer.browser import Browser
 from scrapy.settings import Settings
 from twisted.internet.defer import Deferred
-
 from .browser_request import BrowserRequest
-from .browser_response import BrowserResponse
-
 from scrapy import signals
 from scrapy.http import HtmlResponse
-
 from scrapy.utils.reactor import verify_installed_reactor
-from scrapy.crawler import Crawler
-from scrapy.http import Request, Response
-from scrapy.http.headers import Headers
-from scrapy.responsetypes import responsetypes
-from scrapy.statscollectors import StatsCollector
-from scrapy.utils.defer import deferred_from_coro
+
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +25,7 @@ class ScrapyPyppeteerDownloaderMiddleware:
         verify_installed_reactor("twisted.internet.asyncioreactor.AsyncioSelectorReactor")
         self._browser: Optional[Browser] = None
         self._launch_options = settings.getdict('PYPPETEER_LAUNCH_OPTIONS') or {}
+        self._navigation_timeout: Optional[int] = settings.getint("PYPPETEER_NAVIGATION_TIMEOUT") or None
 
     @classmethod
     async def _from_crawler(cls, crawler):
@@ -53,6 +44,7 @@ class ScrapyPyppeteerDownloaderMiddleware:
 
     def process_request(self, request, spider):
         """Check if the Request should be handled by Puppeteer"""
+        # if request.meta["pyppeteer"]:
         if isinstance(request, BrowserRequest):
             return _aio_as_deferred(self._process_request(request, spider))
         else:
@@ -64,6 +56,8 @@ class ScrapyPyppeteerDownloaderMiddleware:
             self._browser = await pyppeteer.launch(**self._launch_options)
 
         page = await self._browser.newPage()
+        if self._navigation_timeout is not None:
+            page.setDefaultNavigationTimeout(self._navigation_timeout)
 
         n_tabs = _n_browser_tabs(self._browser)
         logger.debug(f'{n_tabs} tabs opened')
@@ -80,7 +74,7 @@ class ScrapyPyppeteerDownloaderMiddleware:
         # # The headers must be set using request interception
         # await page.setRequestInterception(True)
         #
-        # @page.on('request')
+        # @page.on('request')   # not available
         # async def _handle_headers(pu_request):
         #     overrides = {
         #         'headers': {
@@ -89,6 +83,9 @@ class ScrapyPyppeteerDownloaderMiddleware:
         #         }
         #     }
         #     await pu_request.continue_(overrides=overrides)
+
+        # await page.setRequestInterception(True)
+        # page.on("request", modify_url)
 
         response = await page.goto(
             request.url,
@@ -106,7 +103,8 @@ class ScrapyPyppeteerDownloaderMiddleware:
 
         content = await page.content()
         body = str.encode(content)
-        request.meta['page'] = page
+        # make it available for callback function
+        request.cb_kwargs['page'] = page
 
         # Necessary to bypass the compression middleware (?)
         response.headers.pop('content-encoding', None)
@@ -121,9 +119,8 @@ class ScrapyPyppeteerDownloaderMiddleware:
             request=request
         )
 
-
-
     async def _spider_closed(self):
+        # should close only the page
         await self._browser.close()
 
     def spider_closed(self):
@@ -140,9 +137,6 @@ def _n_browser_tabs(browser: Browser) -> int:
             if target.type == 'page':
                 n_tabs += 1
     return n_tabs
-
-
-
 
 def _aio_as_deferred(f):
     """Transform a Twisted Deffered to an Asyncio Future"""

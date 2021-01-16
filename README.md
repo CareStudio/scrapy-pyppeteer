@@ -27,16 +27,15 @@ In settings.py, install asyncio reactor by:
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 ```
 
-After that you can use `scrapy_pyppeteer.BrowserRequest`, and you'll get `scrapy_pyppeteer.BrowserResponse` in your `parse` method. `BrowserResponse` has an extra attribute `page` which is a `pyppeteer.page.Page` instance (a browser tab). If you used `BrowserResponse.empty()`, you'll get an empty tab, and if you specified a URL, then you'll get a tab where `page.goto(url)` has been awaited.
+After that you can use `scrapy_pyppeteer.BrowserRequest`, and you'll get `pyppeteer.page.Page` in your `parse` method. 
 
-To do anything with `response.page`, you need to define your parse callback as `async def`, and use `await` syntax. All actions performed via `await` are executed directly, without going
+To do anything with `page`, you need to define your parse callback as `async def`, and use `await` syntax. All actions performed via `await` are executed directly, without going
 to the scheduler (although in the same global event loop). You can also `yield` items and new requests, which will work normally.
 
 Short example of the parse method
 (see more self-contained examples in "examples" folder of this repo)
 ```python
-    async def parse(self, response: BrowserResponse):
-        page = response.page
+    async def parse(self, response, page: pyppeteer.page.Page):
         yield {'url': response.url}
         for link in await page.querySelectorAll('a'):
             url = await page.evaluate('link => link.href', link)
@@ -46,7 +45,7 @@ Short example of the parse method
 
 ## Settings
 - `PYPPETEER_LAUNCH_OPTIONS`: a dict with pyppeteer launch options, see `pyppeteer.launch` docstring.
-
+- `PYPPETEER_NAVIGATION_TIMEOUT`: PYPPETEER_NAVIGATION_TIMEOUT
 
 ## TODO
 - Set response status and headers
