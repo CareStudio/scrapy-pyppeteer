@@ -26,6 +26,7 @@ class ScrapyPyppeteerDownloaderMiddleware:
         self._browser: Optional[Browser] = None
         self._launch_options = settings.getdict('PYPPETEER_LAUNCH_OPTIONS') or {}
         self._navigation_timeout: Optional[int] = settings.getint("PYPPETEER_NAVIGATION_TIMEOUT") or None
+        self._concurrent_requests: Optional[int] = settings.getint('CONCURRENT_REQUESTS') or None
 
     @classmethod
     async def _from_crawler(cls, crawler):
@@ -55,12 +56,12 @@ class ScrapyPyppeteerDownloaderMiddleware:
         if self._browser is None:
             self._browser = await pyppeteer.launch(**self._launch_options)
 
+        # honor self._concurrent_requests
+        await _honor_concurrent_requests(self._concurrent_requests, self._browser)
+
         page = await self._browser.newPage()
         if self._navigation_timeout is not None:
             page.setDefaultNavigationTimeout(self._navigation_timeout)
-
-        n_tabs = _n_browser_tabs(self._browser)
-        logger.debug(f'{n_tabs} tabs opened')
 
         # Cookies
         if isinstance(request.cookies, dict):
@@ -121,7 +122,7 @@ class ScrapyPyppeteerDownloaderMiddleware:
 
     async def _spider_closed(self):
         # should close only the page
-        if self._browser:
+        if(self._browser):
             await self._browser.close()
 
     def spider_closed(self):
@@ -138,6 +139,23 @@ def _n_browser_tabs(browser: Browser) -> int:
             if target.type == 'page':
                 n_tabs += 1
     return n_tabs
+
+async def _honor_concurrent_requests(max, browser: Browser):
+    # honor self._concurrent_requests
+    if not max:
+        return
+
+    current = _n_browser_tabs(browser)
+    logger.debug(f'{current} tabs opened')
+
+    while True:
+        if current > max:
+            # wait untill tab count match
+            await asyncio.sleep(1)
+            current = _n_browser_tabs(browser)
+        else:
+            break
+
 
 def _aio_as_deferred(f):
     """Transform a Twisted Deffered to an Asyncio Future"""
