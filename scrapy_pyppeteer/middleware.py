@@ -121,7 +121,8 @@ class ScrapyPyppeteerDownloaderMiddleware:
 
     async def _spider_closed(self):
         # should close only the page
-        await self._browser.close()
+        if self._browser:
+            await self._browser.close()
 
     def spider_closed(self):
         """Shutdown the browser when spider is closed"""
