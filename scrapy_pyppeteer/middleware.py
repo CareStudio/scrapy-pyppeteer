@@ -23,7 +23,8 @@ class ScrapyPyppeteerDownloaderMiddleware:
     """
     def __init__(self, settings: Settings):
         verify_installed_reactor("twisted.internet.asyncioreactor.AsyncioSelectorReactor")
-        self._browser: Optional[Browser] = None
+        self._browser: Optional[Browser] = None        
+        self._browser_is_launching: Optional[bool] = False
         self._launch_options = settings.getdict('PYPPETEER_LAUNCH_OPTIONS') or {}
         self._navigation_timeout: Optional[int] = settings.getint("PYPPETEER_NAVIGATION_TIMEOUT") or None
         self._concurrent_requests: Optional[int] = settings.getint('CONCURRENT_REQUESTS') or None
@@ -51,10 +52,22 @@ class ScrapyPyppeteerDownloaderMiddleware:
         else:
             return None
 
+    async def launch_browser(self):
+        if not self._browser:
+            if not self._browser_is_launching:
+                # prevent multiple launch
+                self._browser_is_launching = True
+                self._browser = await pyppeteer.launch(**self._launch_options)
+            else:
+                # wait  browser launching finished
+                while not self._browser:
+                    await asyncio.sleep(1)
+
+                self._browser_is_launching = False
+
     async def _process_request(self, request: BrowserRequest, spider):
         """Handle the request using Puppeteer"""
-        if self._browser is None:
-            self._browser = await pyppeteer.launch(**self._launch_options)
+        await self.launch_browser()
 
         # honor self._concurrent_requests
         await _honor_concurrent_requests(self._concurrent_requests, self._browser)
